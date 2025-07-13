@@ -101,3 +101,6 @@ urllib3==2.5.0
 waypaper==2.6
 wheel==0.45.1
 yt-dlp==2025.6.30
+flask
+torch
+transformers
