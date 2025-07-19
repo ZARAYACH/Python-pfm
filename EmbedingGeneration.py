@@ -8,10 +8,9 @@ from dbUtil import engine
 
 model = SentenceTransformer('all-MiniLM-L6-v2')
 BATCH_SIZE = 1000
-MAX_THREADS = 20
+MAX_THREADS = 1
 
-def process_embeddings() :
-
+def process_embeddings():
     with engine.connect() as conn:
         total = conn.execute(text("""
                                   SELECT COUNT(*) FROM articles
@@ -23,30 +22,35 @@ def process_embeddings() :
 
     all_ids = []
     all_embeddings = []
+
     try:
         with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
             print(f"Submitting {len(offsets)} batches using {MAX_THREADS} threads...")
             futures = [executor.submit(fetch_page, offset) for offset in offsets]
             for future in futures:
-                ids, embeddings = future.result()
-                if embeddings is not None:
-                    all_ids.extend(ids)
-                    all_embeddings.append(embeddings)
+                result = future.result()
+                if result:
+                    ids, embeddings = result
+                    if embeddings is not None:
+                        all_ids.extend(ids)
+                        all_embeddings.append(embeddings)
     except Exception as e:
         print(f"Error in batch thread: {e}")
 
     if all_embeddings:
         all_embeddings_np = np.vstack(all_embeddings)
         print(f"Combined total embeddings shape: {all_embeddings_np.shape}")
-        index = faiss.IndexFlatL2(all_embeddings_np.shape[1])
-        index.add(all_embeddings_np)
+
         index = faiss.IndexIDMap(faiss.IndexFlatL2(all_embeddings_np.shape[1]))
         index.add_with_ids(all_embeddings_np, np.array(all_ids))
 
+        # Save index and IDs
         faiss.write_index(index, "out/arxiv_faiss.index")
         np.save("out/article_ids.npy", np.array(all_ids))
         print("💾 FAISS index saved to out/arxiv_faiss.index")
         print("💾 Article IDs saved to out/article_ids.npy")
+    else:
+        print("⚠️ No embeddings to index — check data and embedding function.")
 
     print("✅ FAISS index created and saved.")
 
