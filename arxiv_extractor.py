@@ -3,6 +3,7 @@ import time
 from EmbedingGeneration import process_embeddings
 from dbUtil import create_tables, insert_article, insert_author, link_article_author, engine
 from importfromfile_v2 import insert_articles_from_file
+from visulisations import generate_visualisations
 
 ARXIV_CATEGORY = 'math'
 MAX_RESULTS = 1000
@@ -45,8 +46,9 @@ def fetch_and_store_arxiv():
 
 
 if __name__ == "__main__":
-    # create_tables()
+    create_tables()
     fetch_and_store_arxiv()
-    # insert_articles_from_file("./data/arxiv-metadata-oai-snapshot.json")
+    insert_articles_from_file("./data/arxiv-metadata-oai-snapshot.json")
     process_embeddings()
+    generate_visualisations()
     print("✅ Done")

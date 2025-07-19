@@ -84,3 +84,8 @@ authors (id, name)
 article_authors (article_id, author_id) — linking table
 
 Indexes are used on arxiv_id and name to speed up lookups
+
+## Visualisations 
+
+- some visualisations of the imported data : https://drive.google.com/drive/folders/1xxCDOSxGwcvf9OlcMQZA11POo_KfTAk1?usp=sharing
+
