@@ -12,9 +12,9 @@ BASE_URL = "http://export.arxiv.org/api/query?"
 
 def fetch_and_store_arxiv():
     for start in range(0, MAX_RESULTS, RESULTS_PER_CALL):
-        print(f"📥 Fetching {start} to {start + RESULTS_PER_CALL}")
+        print(f"Fetching {start} to {start + RESULTS_PER_CALL}")
         query = (
-            f"search_query=all:computer"
+            f"search_query=category:cs"
             f"&start={start}&max_results={RESULTS_PER_CALL}&sortBy=submittedDate&sortOrder=descending"
         )
         feed = feedparser.parse(BASE_URL + query)
@@ -45,8 +45,8 @@ def fetch_and_store_arxiv():
 
 
 if __name__ == "__main__":
-    create_tables()
-    # fetch_and_store_arxiv()
-    insert_articles_from_file("./data/arxiv-metadata-oai-snapshot.json")
+    # create_tables()
+    fetch_and_store_arxiv()
+    # insert_articles_from_file("./data/arxiv-metadata-oai-snapshot.json")
     process_embeddings()
     print("✅ Done")
