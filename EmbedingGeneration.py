@@ -1,58 +1,68 @@
+from sqlalchemy import text
+from concurrent.futures import ThreadPoolExecutor
+import numpy as np
 from sentence_transformers import SentenceTransformer
 import faiss
-import numpy as np
-import pymysql
-from sqlalchemy import create_engine, text
-
-# DB config
-DB_USER = 'root'
-DB_PASS = 'root'
-DB_HOST = 'localhost'
-DB_NAME = 'arxiv_db'
-DB_PORT = 3306
-
-engine = create_engine(f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}", echo=False)
+from cleanUpScript import clean_text
+from dbUtil import engine
 
 model = SentenceTransformer('all-MiniLM-L6-v2')
+BATCH_SIZE = 1000
+MAX_THREADS = 20
 
-with engine.connect() as conn:
-    results = conn.execute(text("SELECT id, abstract FROM articles WHERE abstract IS NOT NULL")).fetchall()
-
-ids = []
-abstracts = []
-
-for r in results:
-    ids.append(r[0])
-    abstracts.append(r[1])
-
-embeddings = model.encode(abstracts, convert_to_numpy=True)
-
-index = faiss.IndexFlatL2(embeddings.shape[1])
-index.add(embeddings)
-
-np.save("article_ids.npy", np.array(ids))
-faiss.write_index(index, "arxiv_faiss.index")
-
-def search_articles(query, top_k=5):
-    model = SentenceTransformer('all-MiniLM-L6-v2')
-    query_embedding = model.encode([query], convert_to_numpy=True)
-
-    index = faiss.read_index("arxiv_faiss.index")
-    article_ids = np.load("article_ids.npy")
-
-    D, I = index.search(query_embedding, top_k)
-    closest_ids = article_ids[I[0]].tolist()
+def process_embeddings() :
 
     with engine.connect() as conn:
-        placeholders = ",".join([f":id{i}" for i in range(len(closest_ids))])
-        sql = f"SELECT title, abstract, published FROM articles WHERE id IN ({placeholders})"
-        params = {f"id{i}": int(closest_ids[i]) for i in range(len(closest_ids))}
-        rows = conn.execute(text(sql), params).fetchall()
+        total = conn.execute(text("""
+                                  SELECT COUNT(*) FROM articles
+                                  WHERE abstract IS NOT NULL AND abstract != ''
+                                  """)).scalar()
+        print(f"Total valid articles with abstracts: {total}")
 
-    return rows
+    offsets = list(range(0, total, BATCH_SIZE))
 
+    all_ids = []
+    all_embeddings = []
+    try:
+        with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+            print(f"Submitting {len(offsets)} batches using {MAX_THREADS} threads...")
+            futures = [executor.submit(fetch_page, offset) for offset in offsets]
+            for future in futures:
+                ids, embeddings = future.result()
+                if embeddings is not None:
+                    all_ids.extend(ids)
+                    all_embeddings.append(embeddings)
+    except Exception as e:
+        print(f"Error in batch thread: {e}")
 
-l
-results = search_articles("4K resolution")
-for title, abstract, published in results:
-    print(f"📄 {title} ({published})\n🧠 {abstract[:300]}...\n")
+    if all_embeddings:
+        all_embeddings_np = np.vstack(all_embeddings)
+        print(f"Combined total embeddings shape: {all_embeddings_np.shape}")
+        index = faiss.IndexFlatL2(all_embeddings_np.shape[1])
+        index.add(all_embeddings_np)
+        index = faiss.IndexIDMap(faiss.IndexFlatL2(all_embeddings_np.shape[1]))
+        index.add_with_ids(all_embeddings_np, np.array(all_ids))
+
+        faiss.write_index(index, "out/arxiv_faiss.index")
+        np.save("out/article_ids.npy", np.array(all_ids))
+        print("💾 FAISS index saved to out/arxiv_faiss.index")
+        print("💾 Article IDs saved to out/article_ids.npy")
+
+    print("✅ FAISS index created and saved.")
+
+def fetch_page(offset):
+    print(f"Fetching batch at offset {offset}")
+    with engine.connect() as conn:
+        query = text(f"""
+            SELECT id, abstract FROM articles
+            WHERE abstract IS NOT NULL AND abstract != ''
+            LIMIT :limit OFFSET :offset
+        """)
+        results = conn.execute(query, {"limit": BATCH_SIZE, "offset": offset}).fetchall()
+        if results:
+            ids = [r[0] for r in results]
+            abstracts = [clean_text(r[1]) for r in results]
+            embeddings = model.encode(abstracts, convert_to_numpy=True, show_progress_bar=False)
+            return ids, embeddings
+        return [], None
+
